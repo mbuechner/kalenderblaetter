@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DDB Kalenderblatt – Monats-Check</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <style>
+    body{background:#f6f7fb}
+    .card{border:0;border-radius:1rem;box-shadow:0 10px 30px rgba(0,0,0,.06)}
+    .table thead th{position:sticky;top:0;background:#fff;z-index:1}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .badge{font-weight:600}
+    th.sortable{cursor:pointer;user-select:none}
+    th .sort-ind{opacity:.55;font-size:.9rem;margin-left:.35rem}
+  </style>
+</head>
+
+<body class="py-4">
+<div class="container">
+  <div class="row g-4">
+
+    <div class="col-12">
+      <div class="card p-3 p-md-4">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+          <div>
+            <h3 class="mb-1">DDB Kalenderblatt – Monats-Check</h3>
+            <div class="text-muted small">
+              TZ: <span class="mono">Europe/Berlin</span> · Parallelität: <span class="mono">8</span> · Timeout: <span class="mono">180s</span>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button id="btnCancel" class="btn btn-outline-secondary" disabled><i class="bi bi-x-circle me-1"></i>Abbrechen</button>
+            <button id="btnStart" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Start</button>
+          </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-4">
+            <label class="form-label">Monat auswählen</label>
+            <input id="monthPicker" type="month" class="form-control" />
+          </div>
+          <div class="col-12 col-md-8">
+            <div class="text-muted small mt-4 mt-md-0">
+              Sortierung: <span class="mono" id="sortLabel">Timestamp ↑</span>
+            </div>
+            <div class="mt-2">
+              <div class="d-flex flex-wrap gap-3 text-muted small">
+                <div>Gesamt: <span id="statTotal" class="fw-semibold">0</span></div>
+                <div>OK: <span id="statOk" class="fw-semibold">0</span></div>
+                <div>Überarbeiten: <span id="statRework" class="fw-semibold">0</span></div>
+                <div>Fehler: <span id="statErr" class="fw-semibold">0</span></div>
+                <div>Offen/Läuft: <span id="statPending" class="fw-semibold">0</span></div>
+              </div>
+              <div class="progress mt-2" role="progressbar" aria-label="Fortschritt" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                <div id="progressBar" class="progress-bar" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card p-0">
+        <div class="table-responsive" style="max-height:65vh;">
+          <table class="table table-hover align-middle mb-0" id="resultsTable">
+            <thead>
+              <tr>
+                <th class="sortable" data-key="iso" style="width:140px;">Datum <span class="sort-ind" data-for="iso"></span></th>
+                <th class="sortable" data-key="ts" style="width:170px;">Timestamp <span class="sort-ind" data-for="ts"></span></th>
+                <th class="sortable" data-key="url">URL <span class="sort-ind" data-for="url"></span></th>
+                <th class="sortable" data-key="status" style="width:160px;">Status <span class="sort-ind" data-for="status"></span></th>
+                <th class="sortable" data-key="note" style="width:280px;">Hinweis <span class="sort-ind" data-for="note"></span></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const TZ = "Europe/Berlin";
+  const BASE = "https://www.deutsche-digitale-bibliothek.de/content/kalenderblatt?date=";
+  const PROXY = "/kalenderblatt?ts=";
+
+  const CONCURRENCY = 8;
+  const TIMEOUT_MS = 180000;
+
+  const $body = $("#resultsBody");
+  const $btnStart = $("#btnStart");
+  const $btnCancel = $("#btnCancel");
+  const $month = $("#monthPicker");
+  const $sortLabel = $("#sortLabel");
+
+  const $statTotal = $("#statTotal"), $statOk = $("#statOk"), $statRework = $("#statRework"), $statErr = $("#statErr"), $statPending = $("#statPending");
+  const $progress = $("#progressBar");
+
+  const S = {
+    items: [],
+    sortKey: "ts",
+    sortDir: "asc",
+    cancel: false,
+    inFlight: new Set()
+  };
+
+  const pad2 = n => String(n).padStart(2, "0");
+  const isoDate = (y,m,d) => `${y}-${pad2(m)}-${pad2(d)}`;
+
+  const badge = (st) => {
+    const map = { OK:"success", "Überarbeiten":"warning", Fehler:"danger", Läuft:"primary", Offen:"secondary" };
+    const cls = map[st] || "secondary";
+    return `<span class="badge text-bg-${cls}">${st}</span>`;
+  };
+
+  const esc = (s) => $("<div>").text(String(s)).html();
+
+  const setProgress = (done, total) => {
+    const pct = total ? Math.round(done / total * 100) : 0;
+    $progress.css("width", pct + "%").attr("aria-valuenow", pct).text(pct ? (pct + "%") : "");
+  };
+
+  const setStats = () => {
+    let ok=0, rw=0, err=0, pend=0;
+    for (const it of S.items) {
+      if (it.status === "OK") ok++;
+      else if (it.status === "Überarbeiten") rw++;
+      else if (it.status === "Fehler") err++;
+      else pend++;
+    }
+    $statTotal.text(S.items.length);
+    $statOk.text(ok);
+    $statRework.text(rw);
+    $statErr.text(err);
+    $statPending.text(pend);
+  };
+
+  const updateSortIndicators = () => {
+    const arrow = S.sortDir === "asc" ? "↑" : "↓";
+    const label = { iso:"Datum", ts:"Timestamp", url:"URL", status:"Status", note:"Hinweis" }[S.sortKey] || S.sortKey;
+    $sortLabel.text(`${label} ${arrow}`);
+    $(".sort-ind").text("");
+    $(`.sort-ind[data-for="${S.sortKey}"]`).text(arrow);
+  };
+
+  const compare = (a,b,k) => {
+    if (k === "ts") return a.ts - b.ts;
+    return String(a[k] ?? "").localeCompare(String(b[k] ?? ""), "de", { numeric:true, sensitivity:"base" });
+  };
+
+  const render = () => {
+    S.items.sort((a,b) => (S.sortDir==="asc" ? 1 : -1) * compare(a,b,S.sortKey));
+    $body.empty();
+    for (const it of S.items) $body.append(it.$tr);
+    updateSortIndicators();
+  };
+
+  const mkRow = (it) => {
+    const safeUrl = esc(it.url);
+    return $(`
+      <tr>
+        <td class="mono">${it.iso}</td>
+        <td class="mono">${it.ts}</td>
+        <td><a class="mono" target="_blank" rel="noopener noreferrer" href="${safeUrl}">${safeUrl}</a></td>
+        <td class="col-status">${badge(it.status)}</td>
+        <td class="col-note small text-muted"></td>
+      </tr>
+    `);
+  };
+
+  const setRow = (it, status, note="") => {
+    it.status = status;
+    it.note = note;
+    it.$tr.find(".col-status").html(badge(status));
+    it.$tr.find(".col-note").text(note);
+  };
+
+  const tzOffsetMs = (dateUtcInstant, timeZone) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", second:"2-digit",
+      hour12:false
+    }).formatToParts(dateUtcInstant).reduce((acc,p) => (acc[p.type]=p.value, acc), {});
+    const asIfUtc = Date.UTC(+parts.year, +parts.month-1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+    return asIfUtc - dateUtcInstant.getTime();
+  };
+
+  const berlinMidnightTs = (y, m0, d) => {
+    let t = Date.UTC(y, m0, d, 0, 0, 0);
+    for (let i=0;i<2;i++) {
+      const off = tzOffsetMs(new Date(t), TZ);
+      const target = Date.UTC(y, m0, d, 0, 0, 0) - off;
+      if (target === t) break;
+      t = target;
+    }
+    return t;
+  };
+
+  const ajaxText = (url) => new Promise((resolve, reject) => {
+    const jq = $.ajax({ url, method:"GET", dataType:"text", timeout: TIMEOUT_MS });
+    S.inFlight.add(jq);
+    jq.done((text, _ts, xhr) => { S.inFlight.delete(jq); resolve({ status: xhr.status, text }); });
+    jq.fail((xhr, textStatus, errorThrown) => {
+      S.inFlight.delete(jq);
+      reject({ status: xhr ? xhr.status : 0, textStatus, errorThrown: errorThrown || "" });
+    });
+  });
+
+  const generateMonth = (year, month0) => {
+    S.items.length = 0;
+    $body.empty();
+
+    const days = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
+    for (let d=1; d<=days; d++) {
+      const ts = berlinMidnightTs(year, month0, d);
+      const iso = isoDate(year, month0+1, d);
+      const url = BASE + ts;
+      const it = { iso, ts, url, status:"Offen", note:"" };
+      it.$tr = mkRow(it);
+      S.items.push(it);
+    }
+
+    setStats();
+    setProgress(0, S.items.length);
+    render();
+  };
+
+  const run = async () => {
+    S.cancel = false;
+    $btnStart.prop("disabled", true);
+    $btnCancel.prop("disabled", false);
+
+    const total = S.items.length;
+    let idx = 0, done = 0;
+
+    const worker = async () => {
+      while (!S.cancel) {
+        const i = idx++;
+        if (i >= total) return;
+
+        const it = S.items[i];
+        setRow(it, "Läuft", "Request…");
+
+        try {
+          const { status, text } = await ajaxText(PROXY + encodeURIComponent(String(it.ts)));
+          if (status >= 200 && status < 300) {
+            if (text && text.includes("Objekt nicht mehr vorhanden")) setRow(it, "Überarbeiten", "Objekt(e) nicht mehr vorhanden");
+            else setRow(it, "OK", "");
+          } else {
+            setRow(it, "Fehler", `HTTP ${status}`);
+          }
+        } catch (e) {
+          const s = (e && typeof e.status === "number") ? e.status : 0;
+          setRow(it, "Fehler", s ? `HTTP ${s} – ${(e.textStatus||"").trim()} ${(e.errorThrown||"").trim()}`.trim() : "Netzwerkfehler");
+        } finally {
+          done++;
+          setStats();
+          setProgress(done, total);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({length: CONCURRENCY}, () => worker()));
+
+    $btnStart.prop("disabled", false);
+    $btnCancel.prop("disabled", true);
+  };
+
+  const cancel = () => {
+    S.cancel = true;
+    for (const jq of S.inFlight) { try { jq.abort(); } catch(_){} }
+    S.inFlight.clear();
+    $btnCancel.prop("disabled", true);
+    $btnStart.prop("disabled", false);
+  };
+
+  const parseMonth = (val) => {
+    if (!/^\d{4}-\d{2}$/.test(val)) return null;
+    const [ys, ms] = val.split("-");
+    const y = parseInt(ys, 10);
+    const m0 = parseInt(ms, 10) - 1;
+    if (!(y>=1900 && y<=2100 && m0>=0 && m0<=11)) return null;
+    return { y, m0 };
+  };
+
+  $btnCancel.on("click", cancel);
+
+  $btnStart.on("click", async () => {
+    const p = parseMonth($month.val());
+    if (!p) { alert("Bitte einen gültigen Monat wählen (YYYY-MM)."); return; }
+    generateMonth(p.y, p.m0);
+    await run();
+  });
+
+  $("th.sortable").on("click", function() {
+    const k = $(this).data("key");
+    if (!k) return;
+    if (S.sortKey === k) S.sortDir = (S.sortDir === "asc") ? "desc" : "asc";
+    else { S.sortKey = k; S.sortDir = "asc"; }
+    render();
+  });
+
+  (() => {
+    const now = new Date();
+    $month.val(`${now.getFullYear()}-${pad2(now.getMonth()+1)}`);
+    updateSortIndicators();
+  })();
+
+})();
+</script>
+</body>
+</html>
