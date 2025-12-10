@@ -4,6 +4,7 @@ const fetch = require("node-fetch"); // v2
 const rateLimit = require("express-rate-limit");
 
 const app = express();
+const BASE_PATH = process.env.BASE_PATH || "/"; // e.g., "/app/kalenderblaetter"
 
 // Hard limits / Whitelist
 const ALLOWED_ORIGIN = "https://www.deutsche-digitale-bibliothek.de";
@@ -21,12 +22,15 @@ app.use(rateLimit({
   legacyHeaders: false
 }));
 
-// Static UI
+// Static UI (mounted under BASE_PATH)
 const webDir = path.join(__dirname, "web");
-app.use(express.static(webDir, { index: "index.html" }));
+app.use(BASE_PATH, express.static(webDir, { index: "index.html" }));
+
+// Router mounted under BASE_PATH to support subpath deployments
+const router = express.Router();
 
 // Proxy-Endpoint: /kalenderblatt?ts=...
-app.get("/kalenderblatt", async (req, res) => {
+router.get("/kalenderblatt", async (req, res) => {
   try {
     const tsRaw = String(req.query.ts ?? "").trim();
     if (!/^-?\d{10,17}$/.test(tsRaw)) return res.status(400).send("Invalid ts");
@@ -58,8 +62,10 @@ app.get("/kalenderblatt", async (req, res) => {
   }
 });
 
-// SPA-Fallback (falls später weitere Routen hinzukommen)
-app.get(/.*/, (_req, res) => res.sendFile(path.join(webDir, "index.html")));
+// SPA-Fallback (only within BASE_PATH)
+router.get(/.*/, (_req, res) => res.sendFile(path.join(webDir, "index.html")));
+
+app.use(BASE_PATH, router);
 
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || "0.0.0.0";

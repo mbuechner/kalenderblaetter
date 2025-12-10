@@ -284,6 +284,7 @@
         const total = S.items.length;
         let idx = 0, done = 0;
 
+        const baseDir = new URL(".", window.location.href); // normalize to directory base
         const worker = async () => {
           while (!S.cancel) {
             const i = idx++;
@@ -293,7 +294,7 @@
             setRow(it, "Läuft", "Request…");
 
             try {
-              const proxyUrl = new URL(PROXY + encodeURIComponent(String(it.ts)), window.location.href).toString();
+              const proxyUrl = new URL(PROXY + encodeURIComponent(String(it.ts)), baseDir).toString();
               const { status, text } = await ajaxText(proxyUrl);
               if (status >= 200 && status < 300) {
                 if (text && text.includes("Objekt nicht mehr vorhanden")) setRow(it, "Überarbeiten", "Objekt(e) nicht mehr vorhanden");
