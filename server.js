@@ -45,7 +45,7 @@ app.get("/kalenderblatt", async (req, res) => {
     const upstream = await fetch(target.toString(), {
       method: "GET",
       redirect: "follow",
-      headers: { "User-Agent": "DDB-Kalenderblatt-Checker/1.0" }
+      headers: { "User-Agent": "kalenderblaetter/0.2 (+https://github.com/mbuechner/kalenderblaetter)" }
     });
 
     const text = await upstream.text();
@@ -62,4 +62,6 @@ app.get("/kalenderblatt", async (req, res) => {
 app.get(/.*/, (_req, res) => res.sendFile(path.join(webDir, "index.html")));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Listening on :${PORT}`));
+const HOST = process.env.HOST || "0.0.0.0";
+
+app.listen(PORT, HOST, () => console.log(`Listening on http://${HOST}:${PORT}`));
