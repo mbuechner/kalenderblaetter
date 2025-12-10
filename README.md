@@ -116,6 +116,7 @@ Aktuell bewusst „fixed settings“ im Frontend:
 - Proxy-Endpoint: **`/kalenderblatt?ts=`** (same-origin)
 
 Server-Host: `HOST` via Env Var (Default 0.0.0.0).
+
 Server-Port: `PORT` via Env Var (Default 8080).
 
 ---
