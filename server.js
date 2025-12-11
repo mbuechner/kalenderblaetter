@@ -17,7 +17,7 @@ app.disable("x-powered-by");
 // Rate limit gegen Missbrauch
 app.use(rateLimit({
   windowMs: 60 * 1000,
-  max: 120, // pro Minute/IP
+  max: 512, // pro Minute/IP
   standardHeaders: true,
   legacyHeaders: false
 }));
