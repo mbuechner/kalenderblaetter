@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="de">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DDB Kalenderblatt – Monats-Check</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.9/dist/css/bootstrap.min.css"
+    integrity="sha384-yEPZ7jP9S0QKiUQ0m3jjsO4ProIW7wvR9gXkI7JOGa2XVsw53Yke2bsdkBbjmmiX" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/luxon@3.7.2/build/global/luxon.min.js"
+    integrity="sha384-MPG/j0tMZel8D/wdSK2M2n+fUXFQ6lHE3r5wnJZ25xVC8KKtBOvT9BGMOmLfSxGT" crossorigin="anonymous"></script>
+  <!-- Klassische Skripte werden in dieser Reihenfolge geladen und funktionieren auch bei file://. -->
+  <script defer src="./js/ddb-api.js"></script>
+  <script defer src="./js/app.js"></script>
+
+  <style>
+    body {
+      background: #f6f7fb;
+    }
+
+    .card {
+      border: 0;
+      border-radius: 1rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .06);
+    }
+
+    .table-responsive {
+      max-height: 65vh;
+    }
+
+    .table thead th {
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 1;
+      padding: 0;
+    }
+
+    .sort-button {
+      display: block;
+      width: 100%;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      white-space: nowrap;
+      background: none;
+      border: 0;
+      padding: .5rem;
+    }
+
+    .sort-button:hover {
+      text-decoration: underline;
+    }
+
+    .sort-button:focus-visible {
+      outline-offset: -2px;
+    }
+
+    .sort-indicator {
+      display: inline-block;
+      width: 1em;
+      margin-inline-start: .35rem;
+    }
+
+    .sort-indicator:empty::after {
+      content: "↕";
+      color: #6c757d;
+    }
+
+    .calendar-link {
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+
+<body class="py-4">
+  <main class="container">
+    <form id="monthForm" class="card p-3 p-md-4 mb-4" novalidate>
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div>
+          <h1 class="h3 mb-1">DDB Kalenderblatt – Monats-Check</h1>
+          <p class="text-muted small mb-0">Datenquelle DDB-API v2 · Zeitzone Europe/Berlin · 8 parallele Anfragen · Zeitlimit 180 s</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button id="btnCancel" type="button" class="btn btn-outline-secondary" disabled>Abbrechen</button>
+          <button id="btnStart" type="submit" class="btn btn-primary" disabled>Start</button>
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <noscript>
+        <p class="alert alert-warning">Für den Monats-Check muss JavaScript aktiviert sein.</p>
+      </noscript>
+      <div id="uiAlert" class="alert alert-warning alert-dismissible" role="alert" hidden>
+        <span id="alertMessage"></span>
+        <button id="btnDismiss" type="button" class="btn-close" aria-label="Meldung schließen"></button>
+      </div>
+
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-md-4">
+          <label for="monthPicker" class="form-label">Monat auswählen</label>
+          <input id="monthPicker" type="month" class="form-control" min="1900-01" max="2100-12" placeholder="JJJJ-MM"
+            required>
+        </div>
+        <div class="col-12 col-md-8">
+          <div class="d-flex flex-wrap gap-3 text-muted small">
+            <div>Gesamt: <span id="statTotal" class="fw-semibold">0</span></div>
+            <div>OK: <span id="statOk" class="fw-semibold">0</span></div>
+            <div>Überarbeiten: <span id="statRework" class="fw-semibold">0</span></div>
+            <div>Fehler: <span id="statErr" class="fw-semibold">0</span></div>
+            <div>Offen/Läuft: <span id="statPending" class="fw-semibold">0</span></div>
+          </div>
+          <div id="progress" class="progress mt-2" role="progressbar" aria-label="Fortschritt" aria-valuenow="0"
+            aria-valuemin="0" aria-valuemax="100">
+            <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <p id="runStatus" class="visually-hidden" role="status"></p>
+        </div>
+      </div>
+    </form>
+
+    <div class="card">
+      <div class="table-responsive" role="region" aria-label="Tagesergebnisse" tabindex="0">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col" data-key="iso" style="width: 140px">
+                <button type="button" class="sort-button">Datum<span class="sort-indicator" aria-hidden="true"></span></button>
+              </th>
+              <th scope="col" data-key="ts" aria-sort="ascending" style="width: 170px">
+                <button type="button" class="sort-button">Timestamp<span class="sort-indicator" aria-hidden="true">↑</span></button>
+              </th>
+              <th scope="col" data-key="url">
+                <button type="button" class="sort-button">URL<span class="sort-indicator" aria-hidden="true"></span></button>
+              </th>
+              <th scope="col" data-key="status" style="width: 160px">
+                <button type="button" class="sort-button">Status<span class="sort-indicator" aria-hidden="true"></span></button>
+              </th>
+              <th scope="col" data-key="note" style="width: 280px">
+                <button type="button" class="sort-button">Hinweis<span class="sort-indicator" aria-hidden="true"></span></button>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</body>
+
+</html>

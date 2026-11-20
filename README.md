@@ -1,124 +1,17 @@
 # DDB Kalenderblatt – Monats-Check
 
-Kleine Webanwendung zur Qualitätsprüfung der DDB-„Kalenderblatt“-Seiten für alle Tage eines ausgewählten Monats.
+Ein Browser-Check für die redaktionellen Tageslisten der Deutschen Digitalen Bibliothek. Er prüft Monate von Januar 1900 bis Dezember 2100. Das Jahr bestimmt die Kalendertage und ihre Unix-Zeitstempel für Mitternacht in `Europe/Berlin`. Als Listenschlüssel dienen Tag und Monat, etwa `29. Mai`.
 
-Die App erzeugt für jeden Tag im Monat den Timestamp für **00:00:00 Europe/Berlin**, ruft das Kalenderblatt ab und bewertet das Ergebnis:
+## Prüfpfad
 
-- **OK**: Seite erreichbar, String nicht gefunden
-- **Überarbeiten**: HTML enthält `Objekt nicht mehr vorhanden`
-- **Fehler**: z. B. HTTP 404/500, Netzwerkfehler, Timeout
+1. **Tagesliste suchen** – `GET /2/favourites/folders` findet die eindeutige, ungesperrte Liste anhand von Redaktionskonto, Portal und Titel.
+2. **Einträge laden** – `GET /2/favourites/folders/{id}/bookmarks` liefert die Einträge. Anzahl und IDs müssen zur Liste passen. [Favourite API](https://deutsche-digitale-bibliothek.atlassian.net/wiki/spaces/DDBDOK/pages/47830484/Favourite+API)
+3. **Verweise prüfen** – Kulturobjekte über `GET /2/items/{id}/view`, Personen über ihre GND-ID im DDB-Personenindex. Bestätigte Ergebnisse werden pro Tag wiederverwendet. [DDB-API v2](https://labs.deutsche-digitale-bibliothek.de/app/ddbapi/)
 
-Alles läuft in **einem Node/Express-Container**:
-- statisches Frontend (`web/index.html`)
-- restriktiver Proxy-Endpoint (`/kalenderblatt?ts=...`) mit Whitelist & Rate-Limit
+| Status | Kriterium |
+| --- | --- |
+| **OK** | Alle Verweise sind bestätigt. |
+| **Überarbeiten** | Ein Objektabruf liefert HTTP 404 mit der DDB-Meldung für einen fehlenden Datensatz. |
+| **Fehler** | Die Liste oder ein Verweis lässt sich nicht eindeutig prüfen. |
 
----
-
-## Features
-
-- Monatsauswahl, Start/Abbrechen
-- Checks parallel mit fester Parallelität (**8**)
-- Timeout fest auf **180 Sekunden**
-- Sortierbare Tabelle (Default: **Timestamp aufsteigend**)
-
----
-
-## Architektur
-
-```
-Browser (UI)
-  └── GET /kalenderblatt?ts=...
-        (Express)
-          └── GET https://www.deutsche-digitale-bibliothek.de/content/kalenderblatt?date={ts}
-```
-
-Der Server baut die Ziel-URL serverseitig und erlaubt nur:
-
-- Origin: `https://www.deutsche-digitale-bibliothek.de`
-- Path: `/content/kalenderblatt`
-- Query: `date=<timestamp>`
-
----
-
-## Repository-Struktur
-
-```
-.
-├─ Dockerfile
-├─ package.json
-├─ package-lock.json
-├─ server.js
-└─ web/
-   └─ index.html
-```
-
----
-
-## Quickstart (lokal ohne Docker)
-
-```bash
-npm ci
-node server.js
-```
-
-Dann im Browser: `http://localhost:8080/`
-
----
-
-## Docker
-
-### Build
-```bash
-docker build -t kalenderblaetter .
-```
-
-### Run
-```bash
-docker run --rm -p 8080:8080 kalenderblaetter
-```
-
-Öffnen: `http://localhost:8080/`
-
----
-
-## Kubernetes (non-root)
-
-Das Image ist für non-root geeignet (wenn im Dockerfile `USER node` gesetzt ist).
-Empfohlener `securityContext`:
-
-```yaml
-securityContext:
-  runAsNonRoot: true
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: ["ALL"]
-```
-
-Optional (wenn `readOnlyRootFilesystem: true` genutzt wird):
-
-```yaml
-volumeMounts:
-  - name: tmp
-    mountPath: /tmp
-volumes:
-  - name: tmp
-    emptyDir: {}
-```
-
----
-
-## Konfiguration
-
-Aktuell bewusst „fixed settings“ im Frontend:
-
-- Parallelität: **8**
-- Timeout: **180s**
-- Proxy-Endpoint: **`/kalenderblatt?ts=`** (same-origin)
-
-Server-Host: `HOST` via Env Var (Default 0.0.0.0).
-
-Server-Port: `PORT` via Env Var (Default 8080).
-
-Server-Base path: `BASE_PATH` via Env Var (Default /).
-
----
+Bis zu acht Tage laufen parallel, mit 180 Sekunden Zeitlimit pro Tag. Ein Abbruch lässt abgeschlossene Ergebnisse stehen und setzt laufende Tage auf **Offen**.
